@@ -1,0 +1,22 @@
+digraph {
+	graph [rankdir=LR]
+	"((a) * (b) + c) * (f)" [label="((a) * (b) + c) * (f) | data -8 | grad 1" shape=record]
+	"((a) * (b) + c) * (f)_*" [label="*"]
+	"((a) * (b) + c) * (f)_*" -> "((a) * (b) + c) * (f)"
+	"(a) * (b) + c" [label="(a) * (b) + c | data 4 | grad -2" shape=record]
+	"(a) * (b) + c_+" [label="+"]
+	"(a) * (b) + c_+" -> "(a) * (b) + c"
+	"(a) * (b)" [label="(a) * (b) | data -6 | grad -2.0" shape=record]
+	"(a) * (b)_*" [label="*"]
+	"(a) * (b)_*" -> "(a) * (b)"
+	a [label="a | data 2 | grad 6.0" shape=record]
+	b [label="b | data -3 | grad -4.0" shape=record]
+	c [label="c | data 10 | grad -2.0" shape=record]
+	f [label="f | data -2 | grad 4" shape=record]
+	"(a) * (b) + c" -> "((a) * (b) + c) * (f)_*"
+	"(a) * (b)" -> "(a) * (b) + c_+"
+	a -> "(a) * (b)_*"
+	b -> "(a) * (b)_*"
+	c -> "(a) * (b) + c_+"
+	f -> "((a) * (b) + c) * (f)_*"
+}
