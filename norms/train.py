@@ -2,7 +2,7 @@ from typing import List, Dict
 import torch
 import logging
 import torch.nn.functional as F
-
+import matplotlib.pyplot as plt
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,15 +15,18 @@ torch.manual_seed(2147483647)
 class Linear:
 
     def __init__(self, in_dim: int, out_dim: int, use_bias: bool = True):
-        self.W = torch.randn((in_dim, out_dim), requires_grad=True)
-        self.b = torch.randn((out_dim), requires_grad=True) if use_bias else None
+        self.W = torch.randn((in_dim, out_dim)) #/ in_dim**0.5
+        self.W.requires_grad_(True)
+
+        self.b = torch.zeros((1, out_dim), requires_grad=True) if use_bias else None
         self.use_bias = use_bias
     
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         if self.use_bias:
-            return x @ self.W + self.b
+            self.out = x @ self.W + self.b
         else:
-            return x @ self.W
+            self.out = x @ self.W
+        return self.out
     
     def parameters(self) -> List[torch.Tensor]:
         return [self.W, self.b]
@@ -35,7 +38,8 @@ class TanH:
         pass
     
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.tanh(x)
+        self.out = torch.tanh(x)
+        return self.out
     
     def parameters(self) -> List[torch.Tensor]:
         return []
@@ -43,9 +47,13 @@ class TanH:
 
 class BatchNorm1D:
 
-    def __init__(self, dim: int, eps: float = 1e-5, momentum: float = 0.9, training: bool = True):
+    def __init__(self, dim: int, eps: float = 1e-5, momentum: float = 0.1, training: bool = True, gamma_scale: int = 1):
+
         self.dim = dim
-        self.gamma = torch.ones((1, dim), requires_grad=True)
+        
+        self.gamma = torch.ones((1, dim)) * gamma_scale
+        self.gamma.requires_grad = True
+
         self.beta = torch.zeros((1, dim), requires_grad=True)
         self.training = training
         self.eps = eps
@@ -53,19 +61,20 @@ class BatchNorm1D:
         self.momentum = momentum
 
         self.running_average = torch.zeros((1, dim))
-        self.running_var = torch.zeros((1, dim))
+        self.running_var = torch.ones((1, dim))
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
 
         if self.training:
             mean = x.mean(dim=0, keepdim=True)
             var = x.var(dim=0, keepdim=True)
-            out = self.gamma * (x - mean) / torch.sqrt(var + self.eps) + self.beta
+            self.out = self.gamma * (x - mean) / torch.sqrt(var + self.eps) + self.beta
 
-            self.running_average = self.momentum * self.running_average + (1 - self.momentum) * mean
-            self.running_var = self.momentum * self.running_var + (1 - self.momentum) * var
+            with torch.no_grad():
+                self.running_average = (1 - self.momentum) * self.running_average + self.momentum * mean
+                self.running_var = (1 - self.momentum) * self.running_var + self.momentum * var
 
-            return out
+            return self.out
         
         # Not training, so inference, using the precomputed running average and variance
         return self.gamma * (x - self.running_average) / torch.sqrt(self.running_var + self.eps) + self.beta
@@ -93,7 +102,7 @@ class MLPTrainer:
         self.vocab: List[str] = list('abcdefghijklmnopqrstuvwxyz')
         self.vocab.insert(0, '.')
         self.vocab_len = len(self.vocab)
-        self.hidden_dim = 256
+        self.hidden_dim = 100
 
         self.ctoi: Dict[str, int] = {c: i for i, c in enumerate(self.vocab)}
 
@@ -105,13 +114,11 @@ class MLPTrainer:
         self.embedding_table = torch.randn((self.vocab_len, self.embedding_dim), requires_grad=True)
         
         self.layers = [
-            Linear(self.embedding_dim * self.context_size, self.hidden_dim),
-            BatchNorm1D(self.hidden_dim),
-            TanH(),
-            Linear(self.hidden_dim, self.hidden_dim),
-            BatchNorm1D(self.hidden_dim),
-            TanH(),
-            Linear(self.hidden_dim, self.vocab_len)
+            Linear(self.embedding_dim * self.context_size, self.hidden_dim), BatchNorm1D(self.hidden_dim), TanH(),
+            Linear(self.hidden_dim, self.hidden_dim), BatchNorm1D(self.hidden_dim), TanH(),
+            Linear(self.hidden_dim, self.hidden_dim), BatchNorm1D(self.hidden_dim), TanH(),
+            Linear(self.hidden_dim, self.hidden_dim), BatchNorm1D(self.hidden_dim), TanH(),
+            Linear(self.hidden_dim, self.vocab_len), BatchNorm1D(self.vocab_len, gamma_scale=0.1),
         ]
 
         logger.info(f'Parameter count={self.get_param_count()}')
@@ -209,7 +216,27 @@ class MLPTrainer:
                 dev_loss = F.cross_entropy(self.forward(dev_xs), dev_ys)
                 logger.info(f'Epoch={epoch}, Loss={loss.item()}, Dev Loss={dev_loss.item()}')
             
+        # Time for activation visualization of tanh layers
+        
+        plt.figure(figsize=(20, 4))
+        activations = []
+        labels = []
+        idx = 0 
+        for layer in self.layers:
+            if isinstance(layer, TanH):
+                activations.append(torch.histogram(layer.out, density=True))
+                labels.append(f'Tanh {idx}')
+                idx += 1
             
+        # plot activations
+        for activation, label in zip(activations, labels):
+            hy, hx = activation
+            plt.plot(hx[: -1].detach(), hy.detach())
+            
+        plt.legend(labels)
+        plt.title('Activation distributions')
+        plt.show()
+
 
     @torch.no_grad()
     def generate(self):
